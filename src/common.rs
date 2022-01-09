@@ -12,6 +12,7 @@ pub use self::Mode::*;
 use std::env;
 use std::fmt;
 use std::fs::{read_dir, remove_file};
+use std::path::Path;
 use std::str::FromStr;
 use std::path::PathBuf;
 #[cfg(feature = "rustc")]
@@ -165,10 +166,10 @@ pub struct Config {
     pub runtool: Option<String>,
 
     /// Flags to pass to the compiler when building for the host
-    pub host_rustcflags: Option<String>,
+    pub host_rustcflags: Vec<String>,
 
     /// Flags to pass to the compiler when building for the target
-    pub target_rustcflags: Option<String>,
+    pub target_rustcflags: Vec<String>,
 
     /// Target system to be tested
     pub target: String,
@@ -283,16 +284,12 @@ impl Config {
             err => panic!("can't get {} environment variable: {}", varname, err),
         });
 
-        // Append to current flags if any are set, otherwise make new String
-        let mut flags = self.target_rustcflags.take().unwrap_or_else(String::new);
         if !lib_paths.is_empty() {
             for p in env::split_paths(&lib_paths) {
-                flags += " -L ";
-                flags += p.to_str().unwrap(); // Can't fail. We already know this is unicode
+                self.target_rustcflags.push("-L".into());
+                self.target_rustcflags.push(p.to_str().unwrap().into()); // Can't fail. We already know this is unicode
             }
         }
-
-        self.target_rustcflags = Some(flags);
     }
 
     /// Remove rmeta files from target `deps` directory
@@ -301,18 +298,15 @@ impl Config {
     /// `cargo build` rlib files, causing E0464 for tests which use
     /// the parent crate.
     pub fn clean_rmeta(&self) {
-        if self.target_rustcflags.is_some() {
-            for directory in self.target_rustcflags
-                .as_ref()
-                .unwrap()
-                .split_whitespace()
-                .filter(|s| s.ends_with("/deps"))
-            {
-                if let Ok(mut entries) = read_dir(directory) {
-                    while let Some(Ok(entry)) = entries.next() {
-                        if entry.file_name().to_string_lossy().ends_with(".rmeta") {
-                            let _ = remove_file(entry.path());
-                        }
+        for directory in self.target_rustcflags
+            .iter()
+            .filter(|s| is_deps_path(&s))
+        {
+            if let Ok(mut entries) = read_dir(directory) {
+                while let Some(Ok(entry)) = entries.next() {
+                    if entry.file_name().to_string_lossy().ends_with(".rmeta") {
+                        eprintln!("{:?}", entry.path());
+                        let _ = remove_file(entry.path());
                     }
                 }
             }
@@ -329,6 +323,11 @@ impl Config {
             tempdir: tmp,
         }
     }
+}
+
+/// Tests whether a path ends in the path component "deps" in a platform independent way.
+fn is_deps_path<A: AsRef<Path>>(path: A) -> bool {
+    path.as_ref().ends_with("deps")
 }
 
 #[cfg(feature = "tmp")]
@@ -385,8 +384,8 @@ impl Default for Config {
             filter_exact: false,
             logfile: None,
             runtool: None,
-            host_rustcflags: None,
-            target_rustcflags: None,
+            host_rustcflags: Vec::new(),
+            target_rustcflags: Vec::new(),
             #[cfg(feature = "rustc")]
             target: platform.clone(),
             #[cfg(not(feature = "rustc"))]
@@ -422,4 +421,17 @@ impl Default for Config {
             edition: None,
         }
     }
+}
+
+#[test]
+fn is_deps_path_tests() {
+    assert!(is_deps_path("/deps"));
+    assert!(!is_deps_path("/deps_"));
+    assert!(!is_deps_path("/_deps"));
+
+    #[cfg(windows)]
+    assert!(is_deps_path("\\deps"));
+
+    #[cfg(not(windows))]
+    assert!(!is_deps_path("\\deps"));
 }

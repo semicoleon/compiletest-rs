@@ -351,7 +351,7 @@ impl<'test> TestCx<'test> {
             .args(&["-Z", &format!("unpretty={}", pretty_type)])
             .args(&["--target", &self.config.target])
             .arg("-L").arg(&aux_dir)
-            .args(self.split_maybe_args(&self.config.target_rustcflags))
+            .args(&self.config.target_rustcflags)
             .args(&self.props.compile_flags)
             .envs(self.props.exec_env.clone());
 
@@ -407,7 +407,7 @@ actual:\n\
             rustc.args(&["--cfg", revision]);
         }
 
-        rustc.args(self.split_maybe_args(&self.config.target_rustcflags));
+        rustc.args(&self.config.target_rustcflags);
         rustc.args(&self.props.compile_flags);
 
         self.compose_and_run_compiler(rustc, Some(src))
@@ -860,9 +860,9 @@ actual:\n\
         }
     }
 
-    fn cleanup_debug_info_options(&self, options: &Option<String>) -> Option<String> {
-        if options.is_none() {
-            return None;
+    fn cleanup_debug_info_options(&self, options: &[String]) -> Vec<String> {
+        if options.is_empty() {
+            return Vec::new();
         }
 
         // Remove options that are either unwanted (-O) or may lead to duplicates due to RUSTFLAGS.
@@ -872,11 +872,12 @@ actual:\n\
             "--debuginfo".to_owned()
         ];
         let new_options =
-            self.split_maybe_args(options).into_iter()
-                                          .filter(|x| !options_to_remove.contains(x))
-                                          .collect::<Vec<String>>();
+            options.iter()
+                .filter(|x| !options_to_remove.contains(x))
+                .cloned()
+                .collect::<Vec<String>>();
 
-        Some(new_options.join(" "))
+        new_options
     }
 
     fn check_debugger_output(&self, debugger_run_result: &ProcRes, check_lines: &[String]) {
@@ -1471,9 +1472,9 @@ actual:\n\
         }
 
         if self.props.force_host {
-            rustc.args(self.split_maybe_args(&self.config.host_rustcflags));
+            rustc.args(&self.config.host_rustcflags);
         } else {
-            rustc.args(self.split_maybe_args(&self.config.target_rustcflags));
+            rustc.args(&self.config.target_rustcflags);
         }
         if let Some(ref linker) = self.config.linker {
             rustc.arg(format!("-Clinker={}", linker));
